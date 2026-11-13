@@ -109,6 +109,7 @@ impl geometry::frame::Backend for Frame {
             path,
             paint,
             rule: into_fill_rule(fill.rule),
+            clip_bounds: self.clip_bounds,
         });
     }
 
@@ -131,6 +132,7 @@ impl geometry::frame::Backend for Frame {
             path,
             paint,
             rule: into_fill_rule(fill.rule),
+            clip_bounds: self.clip_bounds,
         });
     }
 
@@ -149,6 +151,7 @@ impl geometry::frame::Backend for Frame {
             path,
             paint,
             stroke: skia_stroke,
+            clip_bounds: self.clip_bounds,
         });
     }
 
@@ -208,7 +211,7 @@ impl geometry::frame::Backend for Frame {
                 shaping: text.shaping,
                 wrapping: text.wrapping,
                 ellipsis: text.ellipsis,
-                clip_bounds: Rectangle::with_size(Size::INFINITE),
+                clip_bounds: self.clip_bounds,
             });
         } else {
             text.draw_with(|path, color| self.fill(&path, color));
@@ -234,7 +237,25 @@ impl geometry::frame::Backend for Frame {
         Self::new(clip_bounds)
     }
 
-    fn paste(&mut self, frame: Self) {
+    fn paste(&mut self, mut frame: Self) {
+        // Flatten commands without losing either enclosing canvas clip.
+        for primitive in &mut frame.primitives {
+            primitive.clip_to(self.clip_bounds);
+        }
+        for text in &mut frame.text {
+            // Canvas fill_text produces Cached; transformed glyphs are paths.
+            if let Text::Cached { clip_bounds, .. } = text {
+                *clip_bounds = clip_bounds
+                    .intersection(&self.clip_bounds)
+                    .unwrap_or_default();
+            }
+        }
+        for image in &mut frame.images {
+            let (Image::Raster { clip_bounds, .. } | Image::Vector { clip_bounds, .. }) = image;
+            *clip_bounds = clip_bounds
+                .intersection(&self.clip_bounds)
+                .unwrap_or_default();
+        }
         self.primitives.extend(frame.primitives);
         self.text.extend(frame.text);
         self.images.extend(frame.images);
@@ -473,3 +494,6 @@ pub fn into_stroke(stroke: &Stroke<'_>) -> tiny_skia::Stroke {
         ..Default::default()
     }
 }
+
+#[cfg(test)]
+mod tests;

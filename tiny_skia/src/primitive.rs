@@ -10,6 +10,8 @@ pub enum Primitive {
         paint: tiny_skia::Paint<'static>,
         /// The fill rule to follow.
         rule: tiny_skia::FillRule,
+        /// Logical canvas clip retained across frame merges.
+        clip_bounds: Rectangle,
     },
     /// A path stroked with some paint.
     Stroke {
@@ -19,22 +21,52 @@ pub enum Primitive {
         paint: tiny_skia::Paint<'static>,
         /// The stroke settings.
         stroke: tiny_skia::Stroke,
+        /// Logical canvas clip retained across frame merges.
+        clip_bounds: Rectangle,
     },
 }
 
 impl Primitive {
     /// Returns the visible bounds of the [`Primitive`].
     pub fn visible_bounds(&self) -> Rectangle {
-        let bounds = match self {
-            Primitive::Fill { path, .. } => path.bounds(),
-            Primitive::Stroke { path, .. } => path.bounds(),
+        let (bounds, clip) = match self {
+            Primitive::Fill {
+                path, clip_bounds, ..
+            } => {
+                let b = path.bounds();
+                (
+                    Rectangle {
+                        x: b.x(),
+                        y: b.y(),
+                        width: b.width(),
+                        height: b.height(),
+                    },
+                    clip_bounds,
+                )
+            }
+            Primitive::Stroke {
+                path,
+                stroke,
+                clip_bounds,
+                ..
+            } => {
+                let b = path.bounds();
+                let padding = stroke.width / 2.0;
+                (
+                    Rectangle {
+                        x: b.x() - padding,
+                        y: b.y() - padding,
+                        width: b.width() + 2.0 * padding,
+                        height: b.height() + 2.0 * padding,
+                    },
+                    clip_bounds,
+                )
+            }
         };
-
-        Rectangle {
-            x: bounds.x(),
-            y: bounds.y(),
-            width: bounds.width(),
-            height: bounds.height(),
-        }
+        bounds.intersection(clip).unwrap_or_default()
+    }
+    pub(crate) fn clip_to(&mut self, bounds: Rectangle) {
+        let (Self::Fill { clip_bounds, .. } | Self::Stroke { clip_bounds, .. }) = self;
+        *clip_bounds = clip_bounds.intersection(&bounds).unwrap_or_default();
     }
 }
